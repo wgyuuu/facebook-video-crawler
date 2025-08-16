@@ -2,7 +2,7 @@
 
 # Crawler Engine Configuration
 crawler:
-  engine: "chromium"  # Options: "playwright", "selenium"
+  engine: "chromium"  # Options: "chromium"
   headless: false       # Run browser in headless mode
   timeout: 60000        # Page load timeout in milliseconds (increased)
   max_retries: 5        # Maximum retry attempts for failed operations (increased)
