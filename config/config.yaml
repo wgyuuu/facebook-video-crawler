@@ -1,0 +1,193 @@
+# Facebook Video Crawler Configuration File
+
+# Crawler Engine Configuration
+crawler:
+  engine: "playwright"  # Options: "playwright", "selenium"
+  headless: false       # Run browser in headless mode
+  timeout: 30000        # Page load timeout in milliseconds
+  max_retries: 3        # Maximum retry attempts for failed operations
+  concurrent_browsers: 2 # Number of concurrent browser instances
+
+# Anti-Detection Configuration
+anti_detection:
+  # Proxy Configuration
+  proxy:
+    enabled: true
+    pool_size: 50
+    rotation_strategy: "round_robin"  # Options: "round_robin", "random", "failover"
+    test_url: "https://httpbin.org/ip"
+    test_interval: 300  # Test proxy health every 5 minutes
+    
+  # Browser Fingerprint Configuration
+  fingerprint:
+    canvas_randomization: true
+    webgl_spoofing: true
+    font_randomization: true
+    screen_resolution_randomization: true
+    timezone_randomization: true
+    language_randomization: true
+    
+  # Advanced Fingerprint Configuration
+  advanced_fingerprint:
+    enabled: true
+    device_profile_rotation: true
+    fingerprint_rotation_interval: 3600  # Rotate every hour
+    real_device_simulation: true
+    hardware_spoofing: true
+    
+  # Behavior Simulation Configuration
+  behavior:
+    mouse_simulation: true
+    scroll_simulation: true
+    click_delay_range: [100, 500]  # Random delay range in milliseconds
+    scroll_delay_range: [200, 800]
+    page_stay_range: [3000, 8000]  # Random page stay time range
+    
+  # Advanced Behavior Configuration
+  advanced_behavior:
+    enabled: true
+    human_typing_simulation: true
+    mouse_trail_simulation: true
+    bezier_curve_complexity: 4
+    typing_speed_variation: true
+    error_simulation: true
+    random_page_interactions: true
+    
+  # Network Spoofing Configuration
+  network_spoofing:
+    enabled: true
+    connection_type_rotation: true
+    network_fluctuation_simulation: true
+    disconnection_simulation: true
+    performance_api_spoofing: true
+    fetch_api_interception: true
+    
+  # Session Management Configuration
+  session_management:
+    enabled: true
+    session_persistence: true
+    session_rotation: true
+    multi_account_support: true
+    account_rotation_interval: 1800  # Rotate every 30 minutes
+    session_cleanup_interval: 86400  # Clean up every 24 hours
+    
+    # Multi-Account Configuration
+    accounts:
+      - email: "account1@example.com"
+        password: "password1"
+        proxy: "proxy1:port"
+        user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        device_profile: "windows_desktop"
+        region: "US"
+        
+      - email: "account2@example.com"
+        password: "password2"
+        proxy: "proxy2:port"
+        user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+        device_profile: "macbook_pro"
+        region: "UK"
+        
+      - email: "account3@example.com"
+        password: "password3"
+        proxy: "proxy3:port"
+        user_agent: "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15"
+        device_profile: "iphone_14"
+        region: "CA"
+    
+  # Request Disguise Configuration
+  request_disguise:
+    user_agent_rotation: true
+    header_randomization: true
+    request_delay_range: [2000, 5000]  # Delay between requests
+
+# Facebook Configuration
+facebook:
+  # Search Configuration
+  search:
+    max_results: 100        # Maximum number of videos to extract
+    delay_between_searches: [5000, 10000]  # Delay between search requests
+    
+  # Region Configuration
+  regions:
+    - "US"  # United States
+    - "UK"  # United Kingdom
+    - "CA"  # Canada
+    - "AU"  # Australia
+    - "DE"  # Germany
+    
+  # Login Configuration
+  login:
+    enabled: true          # Enable Facebook login (requires credentials)
+    email: "w_yu116@163.com"               # Facebook email/username
+    password: "wgy653252292"            # Facebook password
+    credentials_file: "credentials.json"
+    session_persistence: true
+    
+    # Security Checkpoint Configuration
+    security_checkpoint:
+      enabled: true        # Enable automatic security checkpoint handling
+      max_attempts: 3      # Maximum attempts to resolve checkpoint
+      timeout: 60          # Timeout for checkpoint resolution in seconds
+      
+      # Verification Code (if required)
+      verification_code: ""  # SMS/Email verification code
+      
+      # Security Questions (if required)
+      security_answers:
+        # "What is your mother's maiden name?": "answer_here"
+        # "What was your first pet's name?": "answer_here"
+        # "In what city were you born?": "answer_here"
+      
+      # Captcha Solution (if required)
+      captcha_solution: ""  # Manual captcha solution
+      
+      # Device Confirmation
+      auto_confirm_device: true  # Automatically confirm "This was me"
+    
+  # Video Extraction Configuration
+  video:
+    download_enabled: true
+    quality_preference: "best"  # Options: "best", "720p", "480p", "360p"
+    max_file_size_mb: 500      # Maximum video file size to download
+    
+# Data Storage Configuration
+storage:
+  # File Storage
+  video_path: "./data/videos"
+  temp_path: "./data/temp"
+  
+  # Database Configuration
+  database:
+    enabled: true
+    type: "sqlite"  # Options: "sqlite", "postgresql", "mysql"
+    connection_string: "sqlite:///./data/database/crawler.db"
+    
+  # Session Storage
+  sessions:
+    enabled: true
+    path: "./data/sessions"
+    max_sessions_per_account: 10
+    session_expiry_hours: 24
+    
+  # Logging Configuration
+  logging:
+    level: "INFO"  # Options: "DEBUG", "INFO", "WARNING", "ERROR"
+    format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    file_rotation: true
+    max_file_size_mb: 10
+    backup_count: 5
+    
+# Performance Configuration
+performance:
+  max_memory_usage_mb: 2048
+  max_cpu_usage_percent: 80
+  cleanup_interval: 3600  # Cleanup temporary files every hour
+  
+# Monitoring Configuration
+monitoring:
+  enabled: true
+  metrics_interval: 60    # Collect metrics every minute
+  alert_thresholds:
+    success_rate: 0.95    # Alert if success rate drops below 95%
+    error_rate: 0.05      # Alert if error rate exceeds 5%
+    proxy_failure_rate: 0.2  # Alert if proxy failure rate exceeds 20%
