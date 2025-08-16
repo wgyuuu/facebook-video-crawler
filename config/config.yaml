@@ -4,9 +4,9 @@
 crawler:
   engine: "playwright"  # Options: "playwright", "selenium"
   headless: false       # Run browser in headless mode
-  timeout: 30000        # Page load timeout in milliseconds
-  max_retries: 3        # Maximum retry attempts for failed operations
-  concurrent_browsers: 2 # Number of concurrent browser instances
+  timeout: 60000        # Page load timeout in milliseconds (increased)
+  max_retries: 5        # Maximum retry attempts for failed operations (increased)
+  concurrent_browsers: 1 # Number of concurrent browser instances (reduced)
 
 # Anti-Detection Configuration
 anti_detection:
@@ -31,7 +31,7 @@ anti_detection:
   advanced_fingerprint:
     enabled: true
     device_profile_rotation: true
-    fingerprint_rotation_interval: 3600  # Rotate every hour
+    fingerprint_rotation_interval: 7200  # Rotate every 2 hours (increased)
     real_device_simulation: true
     hardware_spoofing: true
     
@@ -39,9 +39,9 @@ anti_detection:
   behavior:
     mouse_simulation: true
     scroll_simulation: true
-    click_delay_range: [100, 500]  # Random delay range in milliseconds
-    scroll_delay_range: [200, 800]
-    page_stay_range: [3000, 8000]  # Random page stay time range
+    click_delay_range: [2000, 8000]  # Random delay range in milliseconds (increased)
+    scroll_delay_range: [3000, 10000]  # Increased delays
+    page_stay_range: [8000, 15000]  # Random page stay time range (increased)
     
   # Advanced Behavior Configuration
   advanced_behavior:
@@ -58,7 +58,7 @@ anti_detection:
     enabled: true
     connection_type_rotation: true
     network_fluctuation_simulation: true
-    disconnection_simulation: true
+    disconnection_simulation: false  # Disabled to avoid connection issues
     performance_api_spoofing: true
     fetch_api_interception: true
     
@@ -66,8 +66,8 @@ anti_detection:
   session_management:
     enabled: true
     session_persistence: true
-    session_rotation: true
-    multi_account_support: true
+    session_rotation: false  # Disabled to maintain stability
+    multi_account_support: false  # Disabled for now
     account_rotation_interval: 1800  # Rotate every 30 minutes
     session_cleanup_interval: 86400  # Clean up every 24 hours
     
@@ -104,8 +104,8 @@ anti_detection:
 facebook:
   # Search Configuration
   search:
-    max_results: 100        # Maximum number of videos to extract
-    delay_between_searches: [5000, 10000]  # Delay between search requests
+    max_results: 50        # Maximum number of videos to extract (reduced)
+    delay_between_searches: [10000, 20000]  # Delay between search requests (increased)
     
   # Region Configuration
   regions:
@@ -120,14 +120,13 @@ facebook:
     enabled: true          # Enable Facebook login (requires credentials)
     email: "w_yu116@163.com"               # Facebook email/username
     password: "wgy653252292"            # Facebook password
-    credentials_file: "credentials.json"
     session_persistence: true
     
     # Security Checkpoint Configuration
     security_checkpoint:
       enabled: true        # Enable automatic security checkpoint handling
       max_attempts: 3      # Maximum attempts to resolve checkpoint
-      timeout: 60          # Timeout for checkpoint resolution in seconds
+      timeout: 120         # Timeout for checkpoint resolution in seconds (increased)
       
       # Verification Code (if required)
       verification_code: ""  # SMS/Email verification code

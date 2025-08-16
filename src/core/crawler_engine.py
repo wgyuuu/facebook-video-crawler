@@ -269,36 +269,108 @@ class CrawlerEngine:
         if not self.is_running or not self.page:
             raise RuntimeError("Crawler engine not running")
         
-        try:
-            self.operation_count += 1
-            self.logger.info(f"Navigating to: {url}")
-            
-            # Add random delay before navigation
-            await self._random_delay(1000, 3000)
-            
-            # Navigate to page
-            response = await self.page.goto(url, wait_until="networkidle")
-            
-            if not response or response.status >= 400:
-                self.logger.error(f"Navigation failed: {response.status if response else 'No response'}")
-                return False
-            
-            # Wait for specific element if specified
-            if wait_for:
+        max_retries = self.config.get("max_retries", 3)
+        
+        for attempt in range(max_retries):
+            try:
+                self.operation_count += 1
+                self.logger.info(f"Navigating to: {url} (attempt {attempt + 1}/{max_retries})")
+                
+                # Add random delay before navigation
+                await self._random_delay(2000, 5000)
+                
+                # Clear cookies and storage before navigation (helps with anti-detection)
+                if attempt > 0:
+                    await self.page.context.clear_cookies()
+                    await self.page.evaluate("""
+                        localStorage.clear();
+                        sessionStorage.clear();
+                        indexedDB.deleteDatabase('facebook');
+                    """)
+                
+                # Navigate to page with more flexible wait strategy
                 try:
-                    await self.page.wait_for_selector(wait_for, timeout=10000)
-                except Exception as e:
-                    self.logger.warning(f"Timeout waiting for selector {wait_for}: {e}")
-            
-            # Simulate human behavior
-            await self._simulate_human_behavior()
-            
-            self.logger.info(f"Successfully navigated to: {url}")
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"Navigation failed: {e}")
-            return False
+                    # First try with domcontentloaded (faster, less likely to fail)
+                    response = await self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                    
+                    if response and response.status >= 400:
+                        self.logger.warning(f"Navigation got status {response.status}, retrying...")
+                        continue
+                    
+                    # Wait a bit for the page to stabilize
+                    await asyncio.sleep(3)
+                    
+                    # Then wait for network to be mostly idle (but with shorter timeout)
+                    try:
+                        await self.page.wait_for_load_state("networkidle", timeout=15000)
+                    except Exception:
+                        self.logger.info("Network idle timeout, continuing anyway")
+                    
+                except Exception as nav_error:
+                    if "ERR_ABORTED" in str(nav_error) or "frame was detached" in str(nav_error):
+                        self.logger.warning(f"Navigation aborted (attempt {attempt + 1}): {nav_error}")
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(5)  # Wait longer before retry
+                            continue
+                        else:
+                            raise
+                    else:
+                        raise
+                
+                # Wait for specific element if specified
+                if wait_for:
+                    try:
+                        await self.page.wait_for_selector(wait_for, timeout=15000)
+                    except Exception as e:
+                        self.logger.warning(f"Timeout waiting for selector {wait_for}: {e}")
+                        # Don't fail the navigation if selector timeout
+                
+                # Verify page loaded successfully
+                try:
+                    page_title = await self.page.title()
+                    if not page_title or page_title == "about:blank":
+                        raise Exception("Page title is empty or blank")
+                    
+                    # Check if we're on the right page
+                    current_url = self.page.url
+                    if "facebook.com" in url and "facebook.com" not in current_url:
+                        raise Exception(f"Redirected to wrong domain: {current_url}")
+                    
+                except Exception as verify_error:
+                    self.logger.warning(f"Page verification failed: {verify_error}")
+                    if attempt < max_retries - 1:
+                        continue
+                    else:
+                        raise
+                
+                # Simulate human behavior
+                await self._simulate_human_behavior()
+                
+                self.logger.info(f"Successfully navigated to: {url}")
+                return True
+                
+            except Exception as e:
+                self.logger.error(f"Navigation attempt {attempt + 1} failed: {e}")
+                
+                if attempt < max_retries - 1:
+                    self.logger.info(f"Retrying navigation in 5 seconds...")
+                    await asyncio.sleep(5)
+                    
+                    # Try to recover the page if it's in a bad state
+                    try:
+                        if self.page and not self.page.is_closed():
+                            # Try to refresh the page
+                            await self.page.reload(wait_until="domcontentloaded", timeout=20000)
+                        else:
+                            # Recreate the page if it's closed
+                            await self._create_page()
+                    except Exception as recovery_error:
+                        self.logger.warning(f"Page recovery failed: {recovery_error}")
+                else:
+                    self.logger.error(f"All navigation attempts failed for: {url}")
+                    return False
+        
+        return False
     
     async def _simulate_human_behavior(self) -> None:
         """Simulate human-like behavior on the page"""

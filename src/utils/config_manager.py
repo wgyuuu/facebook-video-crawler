@@ -20,16 +20,24 @@ class ConfigManager:
         Args:
             config_path: Path to configuration file
         """
-        self.config_path = config_path or "config/config.yaml"
-        self.config: Dict[str, Any] = {}
         self.logger = logging.getLogger(__name__)
+
+        if config_path is None:
+            # Try to find config file relative to the project root
+            current_dir = Path(__file__).parent.parent.parent
+            self.config_path = current_dir / "config" / "config.yaml"
+        else:
+            self.config_path = Path(config_path)
+        
+        self.logger.info(f"Config path: {self.config_path}")
+        self.config: Dict[str, Any] = {}
         self._load_config()
     
     def _load_config(self) -> None:
         """Load configuration from file and environment variables"""
         try:
             # Load base configuration from file
-            if os.path.exists(self.config_path):
+            if self.config_path and self.config_path.exists():
                 with open(self.config_path, 'r', encoding='utf-8') as file:
                     self.config = yaml.safe_load(file) or {}
                 self.logger.info(f"Configuration loaded from {self.config_path}")
@@ -159,15 +167,32 @@ class ConfigManager:
     
     def _ensure_directories(self) -> None:
         """Ensure required directories exist"""
-        directories = [
-            self.get("storage.video_path"),
-            os.path.dirname(self.get("storage.database.connection_string").replace("sqlite:///", "")),
-            os.path.dirname(self.get("storage.logging.file_path"))
-        ]
+        directories = []
+        
+        # Add video path
+        video_path = self.get("storage.video_path")
+        if video_path:
+            directories.append(video_path)
+        
+        # Add database directory
+        db_connection = self.get("storage.database.connection_string")
+        if db_connection and isinstance(db_connection, str):
+            if db_connection.startswith("sqlite:///"):
+                db_path = db_connection.replace("sqlite:///", "")
+                if db_path:
+                    directories.append(Path(db_path).parent)
+        
+        # Add logging directory
+        log_path = self.get("storage.logging.file_path")
+        if log_path:
+            directories.append(Path(log_path).parent)
         
         for directory in directories:
             if directory:
-                Path(directory).mkdir(parents=True, exist_ok=True)
+                try:
+                    Path(directory).mkdir(parents=True, exist_ok=True)
+                except Exception as e:
+                    self.logger.warning(f"Failed to create directory {directory}: {e}")
     
     def get(self, key: str, default: Any = None) -> Any:
         """
@@ -226,20 +251,24 @@ class ConfigManager:
         save_path = config_path or self.config_path
         
         try:
-            os.makedirs(os.path.dirname(save_path), exist_ok=True)
-            with open(save_path, 'w', encoding='utf-8') as file:
-                yaml.dump(self.config, file, default_flow_style=False, allow_unicode=True)
-            self.logger.info(f"Configuration saved to {save_path}")
+            if save_path:
+                save_path = Path(save_path)
+                save_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(save_path, 'w', encoding='utf-8') as file:
+                    yaml.dump(self.config, file, default_flow_style=False, allow_unicode=True)
+                self.logger.info(f"Configuration saved to {save_path}")
+            else:
+                self.logger.error("No valid save path specified")
         except Exception as e:
             self.logger.error(f"Failed to save configuration: {e}")
     
     def get_proxy_list(self) -> List[str]:
         """Get list of proxy servers from proxies.txt file"""
-        proxy_file = "config/proxies.txt"
+        proxy_file = Path(__file__).parent.parent.parent / "config" / "proxies.txt"
         proxies = []
         
         try:
-            if os.path.exists(proxy_file):
+            if proxy_file.exists():
                 with open(proxy_file, 'r', encoding='utf-8') as file:
                     for line in file:
                         line = line.strip()
@@ -252,11 +281,11 @@ class ConfigManager:
     
     def get_user_agents(self) -> List[str]:
         """Get list of user agents from user_agents.txt file"""
-        ua_file = "config/user_agents.txt"
+        ua_file = Path(__file__).parent.parent.parent / "config" / "user_agents.txt"
         user_agents = []
         
         try:
-            if os.path.exists(ua_file):
+            if ua_file.exists():
                 with open(ua_file, 'r', encoding='utf-8') as file:
                     for line in file:
                         line = line.strip()
@@ -269,7 +298,7 @@ class ConfigManager:
         if not user_agents:
             user_agents = [
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_0.0 Safari/537.36"
             ]
         
         return user_agents

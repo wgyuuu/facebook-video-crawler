@@ -22,6 +22,7 @@ from .anti_detection.network_fingerprint_spoofer import network_fingerprint_spoo
 from .data.video_extractor import VideoExtractor, VideoMetadata
 from .utils.logger import get_logger, setup_logging
 from .utils.config_manager import config
+from .utils.error_handler import FacebookErrorHandler
 
 
 class FacebookVideoCrawler:
@@ -47,9 +48,18 @@ class FacebookVideoCrawler:
         self.network_fingerprint_spoofer = network_fingerprint_spoofer
         self.crawler_engine = None
         self.video_extractor = None
+        self.error_handler = FacebookErrorHandler()
         
         # Configuration
         self.config = config.get_facebook_config()
+        if not self.config:
+            self.logger.warning("Failed to load Facebook config, using defaults")
+            self.config = {
+                "search": {"max_results": 50},
+                "login": {"enabled": False},
+                "video": {"download_enabled": True}
+            }
+        
         if config_overrides:
             for key, value in config_overrides.items():
                 if key in self.config:
@@ -184,135 +194,73 @@ class FacebookVideoCrawler:
                 "region": region
             })
             
-            # Construct search URL
-            search_url = self._build_search_url(keyword, region)
+            # Step 1: Navigate to Facebook homepage with multiple strategies
+            self.logger.info("Step 1: Navigating to Facebook homepage...")
+            navigation_success = await self._navigate_to_facebook_homepage()
             
-            # Try direct search first
-            search_success = False
-            max_retries = 2
+            if not navigation_success:
+                error_msg = "Failed to navigate to Facebook homepage after multiple attempts"
+                self.logger.error(error_msg)
+                error_video = VideoMetadata()
+                error_video.status = "failed"
+                error_video.error_message = error_msg
+                error_video.extracted_at = time.strftime("%Y-%m-%d %H:%M:%S")
+                return [error_video]
             
-            for attempt in range(max_retries):
-                try:
-                    if await self.crawler_engine.navigate_to(search_url):
-                        self.logger.info(f"Successfully navigated to search page on attempt {attempt + 1}")
-                        search_success = True
-                        break
-                    else:
-                        self.logger.warning(f"Direct search failed on attempt {attempt + 1}")
-                        if attempt < max_retries - 1:
-                            await asyncio.sleep(2)
-                            continue
-                except Exception as e:
-                    self.logger.error(f"Direct search error on attempt {attempt + 1}: {e}")
-                    if attempt < max_retries - 1:
-                        await asyncio.sleep(2)
-                        continue
+            # Wait for page to load and stabilize
+            await asyncio.sleep(5)
+            self.logger.info("Successfully navigated to Facebook homepage")
             
-            # If direct search fails, try alternative approach: go to Facebook homepage and search
-            if not search_success:
-                self.logger.info("Direct search failed, trying alternative approach via Facebook homepage...")
-                try:
-                    # Navigate to Facebook homepage first
-                    if await self.crawler_engine.navigate_to("https://www.facebook.com/"):
-                        self.logger.info("Successfully navigated to Facebook homepage")
-                        await asyncio.sleep(3)
-                        
-                        # Check if login is required
-                        login_indicators = [
-                            "input[name='email']",
-                            "input[name='pass']",
-                            "button[name='login']",
-                            "[data-testid='royal_login_button']"
-                        ]
-                        
-                        login_required = False
-                        for indicator in login_indicators:
-                            try:
-                                if await self.crawler_engine.page.query_selector(indicator):
-                                    login_required = True
-                                    self.logger.warning("Login required to access Facebook search functionality")
-                                    break
-                            except Exception:
-                                continue
-                        
-                        if not login_required:
-                            # Try to find and use the search box
-                            search_box_selectors = [
-                                "input[placeholder*='Search']",
-                                "input[name='q']",
-                                "input[aria-label*='Search']",
-                                "[data-testid='search_input']",
-                                "input[type='search']"
-                            ]
-                        
-                            search_box = None
-                            for selector in search_box_selectors:
-                                try:
-                                    search_box = await self.crawler_engine.page.query_selector(selector)
-                                    if search_box:
-                                        self.logger.info(f"Found search box with selector: {selector}")
-                                        break
-                                except Exception as e:
-                                    self.logger.debug(f"Selector {selector} failed: {e}")
-                                    continue
-                            
-                            if search_box:
-                                # Clear and fill search box
-                                await search_box.click()
-                                await search_box.fill(keyword)
-                                await asyncio.sleep(1)
-                                
-                                # Press Enter to search
-                                await search_box.press("Enter")
-                                await asyncio.sleep(5)
-                                
-                                self.logger.info("Search performed via homepage search box")
-                                search_success = True
-                            else:
-                                self.logger.warning("Could not find search box on homepage")
-                        else:
-                            self.logger.error("Facebook requires login for search functionality")
-                    else:
-                        self.logger.error("Failed to navigate to Facebook homepage")
-                        
-                except Exception as e:
-                    self.logger.error(f"Alternative search approach failed: {e}")
+            # Step 2: Check if login is required and perform login if needed
+            self.logger.info("Step 2: Checking login status...")
+            login_required = await self._check_login_required()
+            
+            if login_required:
+                self.logger.info("Login required, attempting to authenticate...")
+                login_result = await self._perform_login()
+                if not login_result["success"]:
+                    error_msg = f"Login failed: {login_result['reason']}"
+                    self.logger.error(error_msg)
+                    error_video = VideoMetadata()
+                    error_video.status = "failed"
+                    error_video.error_message = error_msg
+                    error_video.extracted_at = time.strftime("%Y-%m-%d %H:%M:%S")
+                    return [error_video]
+                
+                self.logger.info("Login successful, waiting for page to load...")
+                await asyncio.sleep(8)  # Increased wait time after login
+                
+                # Verify we're logged in by checking for login indicators
+                if await self._check_login_required():
+                    error_msg = "Login verification failed - still showing login form"
+                    self.logger.error(error_msg)
+                    error_video = VideoMetadata()
+                    error_video.status = "failed"
+                    error_video.error_message = error_msg
+                    error_video.extracted_at = time.strftime("%Y-%m-%d %H:%M:%S")
+                    return [error_video]
+            else:
+                self.logger.info("Already logged in or no login required")
+            
+            # Step 3: Find and use the search functionality
+            self.logger.info("Step 3: Looking for search functionality...")
+            search_success = await self._perform_search(keyword)
             
             if not search_success:
-                self.logger.error("All search methods failed")
-                
-                # Check if login is enabled in config
-                if self.config.get("login", {}).get("enabled", False):
-                    self.logger.info("Login is enabled, attempting to authenticate...")
-                    login_result = await self._attempt_login()
-                    if login_result["success"]:
-                        self.logger.info("Login successful, retrying search...")
-                        # Retry search after login
-                        search_url = self._build_search_url(keyword, region)
-                        if await self.crawler_engine.navigate_to(search_url):
-                            search_success = True
-                            self.logger.info("Search successful after login")
-                        else:
-                            self.logger.error("Search still failed after login")
-                    else:
-                        # Login failed, return error with reason
-                        error_message = f"Login failed: {login_result['reason']}"
-                        self.logger.error(error_message)
-                        # Create a VideoMetadata object with error information
-                        error_video = VideoMetadata()
-                        error_video.status = "failed"
-                        error_video.error_message = error_message
-                        error_video.extracted_at = time.strftime("%Y-%m-%d %H:%M:%S")
-                        # Return list with error information instead of trying fallback
-                        return [error_video]
-                
-                # No fallback approach needed - if login fails, we return error
-                # If login is not enabled, we also return empty results
+                error_msg = "Failed to perform search on Facebook"
+                self.logger.error(error_msg)
+                error_video = VideoMetadata()
+                error_video.status = "failed"
+                error_video.error_message = error_msg
+                error_video.extracted_at = time.strftime("%Y-%m-%d %H:%M:%S")
+                return [error_video]
             
-            # Wait for search results to load with better error handling
+            # Step 4: Wait for search results and extract video URLs
+            self.logger.info("Step 4: Waiting for search results to load...")
+            await asyncio.sleep(8)  # Increased wait time for search results
+            
+            # Check if page loaded successfully
             try:
-                await asyncio.sleep(5)
-                # Check if page loaded successfully
                 page_title = await self.crawler_engine.page.title()
                 self.logger.info(f"Page title: {page_title}")
             except Exception as e:
@@ -346,6 +294,73 @@ class FacebookVideoCrawler:
             error_video.extracted_at = time.strftime("%Y-%m-%d %H:%M:%S")
             return [error_video]
     
+    async def _navigate_to_facebook_homepage(self) -> bool:
+        """Navigate to Facebook homepage with multiple fallback strategies"""
+        facebook_urls = [
+            "https://www.facebook.com/",
+            "https://www.facebook.com/?lsrc=lb",  # The URL that was failing
+            "https://m.facebook.com/",  # Mobile version as fallback
+            "https://www.facebook.com/home.php"  # Alternative homepage URL
+        ]
+        
+        for i, url in enumerate(facebook_urls):
+            try:
+                self.logger.info(f"Attempting to navigate to Facebook URL {i+1}: {url}")
+                
+                # Use error handler for navigation
+                navigation_result = await self.error_handler.retry_with_backoff(
+                    lambda: self.crawler_engine.navigate_to(url),
+                    max_retries=3,
+                    operation_name=f"navigation_to_{url}"
+                )
+                
+                if navigation_result:
+                    # Verify we're actually on Facebook
+                    try:
+                        current_url = self.crawler_engine.page.url
+                        page_title = await self.crawler_engine.page.title()
+                        
+                        if "facebook.com" in current_url and page_title:
+                            self.logger.info(f"Successfully navigated to Facebook: {current_url}")
+                            return True
+                        else:
+                            self.logger.warning(f"Navigation succeeded but wrong page: {current_url}")
+                            continue
+                            
+                    except Exception as verify_error:
+                        self.logger.warning(f"Page verification failed: {verify_error}")
+                        continue
+                else:
+                    self.logger.warning(f"Navigation to {url} failed after retries")
+                    continue
+                
+            except Exception as e:
+                # Analyze the error to understand what happened
+                error_analysis = await self.error_handler.handle_facebook_error(e, f"navigation_to_{url}")
+                
+                if error_analysis["recoverable"]:
+                    self.logger.warning(f"Recoverable error navigating to {url}: {e}")
+                    if i < len(facebook_urls) - 1:
+                        self.logger.info(f"Trying next Facebook URL in {error_analysis['wait_time']} seconds...")
+                        await asyncio.sleep(error_analysis['wait_time'])
+                        continue
+                else:
+                    self.logger.error(f"Non-recoverable error navigating to {url}: {e}")
+                    if error_analysis["recommendation"] == "wait_and_retry_later":
+                        self.logger.info(f"Waiting {error_analysis['wait_time']} seconds before trying next URL...")
+                        await asyncio.sleep(error_analysis['wait_time'])
+                        continue
+                
+                if i < len(facebook_urls) - 1:
+                    self.logger.info("Trying next Facebook URL...")
+                    await asyncio.sleep(3)
+                    continue
+                else:
+                    self.logger.error("All Facebook URLs failed")
+                    return False
+        
+        return False
+    
     def _build_search_url(self, keyword: str, region: Optional[str] = None) -> str:
         """Build Facebook search URL"""
         # Facebook search URL format - using the most common and stable format
@@ -366,6 +381,275 @@ class FacebookVideoCrawler:
         
         return f"{base_url}?{query_string}"
     
+    async def _check_login_required(self) -> bool:
+        """Check if Facebook login is required"""
+        try:
+            # Look for login form elements
+            login_indicators = [
+                "input[name='email']",
+                "input[name='pass']",
+                "button[name='login']",
+                "[data-testid='royal_login_button']",
+                "form[action*='login']"
+            ]
+            
+            for indicator in login_indicators:
+                try:
+                    if await self.crawler_engine.page.query_selector(indicator):
+                        self.logger.info(f"Login required - found indicator: {indicator}")
+                        return True
+                except Exception:
+                    continue
+            
+            # Also check for logout button to confirm we're logged in
+            logout_indicators = [
+                "[data-testid='blue_bar_profile_link']",
+                "div[aria-label='Your profile']",
+                "a[href*='/me']",
+                "div[data-testid='pagelet_bluebar']"
+            ]
+            
+            for indicator in logout_indicators:
+                try:
+                    if await self.crawler_engine.page.query_selector(indicator):
+                        self.logger.info(f"Already logged in - found indicator: {indicator}")
+                        return False
+                except Exception:
+                    continue
+            
+            # If we can't determine, assume login is required for safety
+            self.logger.warning("Unable to determine login status, assuming login required")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error checking login status: {e}")
+            return True
+    
+    async def _perform_login(self) -> dict:
+        """Perform Facebook login using configured credentials"""
+        try:
+            self.logger.info("Starting Facebook login process...")
+            
+            # Get credentials from config
+            credentials = self.config.get("login", {})
+            self.logger.info(f"Credentials: {credentials}")
+            if not credentials:
+                error_msg = "Login configuration not found"
+                self.logger.error(error_msg)
+                return {"success": False, "reason": error_msg}
+            
+            email = credentials.get("email")
+            password = credentials.get("password")
+            
+            if not email or not password:
+                error_msg = f"Login credentials not configured. Email: {'set' if email else 'missing'}, Password: {'set' if password else 'missing'}"
+                self.logger.error(error_msg)
+                return {"success": False, "reason": error_msg}
+            
+            # Find and fill email field
+            email_field = await self.crawler_engine.page.query_selector("input[name='email']")
+            if not email_field:
+                error_msg = "Email field not found on login page"
+                self.logger.error(error_msg)
+                return {"success": False, "reason": error_msg}
+            
+            # Use advanced behavior simulation for email input
+            if self.config.get("anti_detection", {}).get("advanced_behavior", {}).get("enabled", True):
+                await self.advanced_behavior_simulator.simulate_human_typing(
+                    self.crawler_engine.page, email_field, email, speed="normal"
+                )
+            else:
+                await email_field.click()
+                await email_field.fill(email)
+                await asyncio.sleep(1)
+            
+            # Find and fill password field
+            password_field = await self.crawler_engine.page.query_selector("input[name='pass']")
+            if not password_field:
+                error_msg = "Password field not found on login page"
+                self.logger.error(error_msg)
+                return {"success": False, "reason": error_msg}
+            
+            # Use advanced behavior simulation for password input
+            if self.config.get("anti_detection", {}).get("advanced_behavior", {}).get("enabled", True):
+                await self.advanced_behavior_simulator.simulate_human_typing(
+                    self.crawler_engine.page, password_field, password, speed="fast"
+                )
+            else:
+                await password_field.click()
+                await password_field.fill(password)
+                await asyncio.sleep(1)
+            
+            # Click login button
+            login_button = await self.crawler_engine.page.query_selector("button[name='login']")
+            if not login_button:
+                error_msg = "Login button not found on login page"
+                self.logger.error(error_msg)
+                return {"success": False, "reason": error_msg}
+            
+            # Use advanced behavior simulation for login button click
+            if self.config.get("anti_detection", {}).get("advanced_behavior", {}).get("enabled", True):
+                await self.advanced_behavior_simulator.simulate_mouse_trail(
+                    self.crawler_engine.page, "button[name='login']"
+                )
+                await self.advanced_behavior_simulator.simulate_human_click(
+                    self.crawler_engine.page, "button[name='login']"
+                )
+            else:
+                await login_button.click()
+            
+            await asyncio.sleep(5)
+            
+            # Check for security checkpoint and handle it
+            checkpoint_result = await self._handle_security_checkpoint()
+            if checkpoint_result["handled"]:
+                if checkpoint_result["success"]:
+                    self.logger.info("Security checkpoint handled successfully")
+                    return {"success": True, "reason": "Login successful after security checkpoint"}
+                else:
+                    return {"success": False, "reason": checkpoint_result["reason"]}
+            
+            # Check if login was successful
+            try:
+                # Look for elements that indicate successful login
+                success_indicators = [
+                    "div[data-testid='pagelet_bluebar']",
+                    "div[data-testid='blue_bar_profile_link']",
+                    "div[aria-label='Your profile']",
+                    "div[data-testid='blue_bar_profile_link']",
+                    "a[data-testid='blue_bar_profile_link']"
+                ]
+                
+                # Store session data if login successful
+                if self.config.get("anti_detection", {}).get("session_management", {}).get("enabled", True):
+                    try:
+                        session_data = await self.session_manager.extract_session_data(
+                            self.crawler_engine.page
+                        )
+                        if session_data:
+                            self.session_manager.store_session(email, session_data)
+                    except Exception as e:
+                        self.logger.warning(f"Failed to store session data: {e}")
+                
+                for indicator in success_indicators:
+                    if await self.crawler_engine.page.query_selector(indicator):
+                        self.logger.info("Login successful")
+                        return {"success": True, "reason": "Login successful"}
+                
+                # Check for login errors
+                error_indicators = [
+                    "div[data-testid='error_box']",
+                    "div[data-testid='error_message']",
+                    "div[class*='error']",
+                    "div[class*='alert']",
+                    "div[class*='_50f4']"  # Facebook error class
+                ]
+                
+                for indicator in error_indicators:
+                    error_element = await self.crawler_engine.page.query_selector(indicator)
+                    if error_element:
+                        error_text = await error_element.text_content()
+                        if error_text and error_text.strip():
+                            error_msg = f"Facebook login error: {error_text.strip()}"
+                            self.logger.error(error_msg)
+                            return {"success": False, "reason": error_msg}
+                
+                # Check for specific Facebook error messages
+                page_content = await self.crawler_engine.page.content()
+                if "incorrect password" in page_content.lower() or "wrong password" in page_content.lower():
+                    error_msg = "Incorrect password"
+                    self.logger.error(error_msg)
+                    return {"success": False, "reason": error_msg}
+                elif "account not found" in page_content.lower() or "no account found" in page_content.lower():
+                    error_msg = "Account not found"
+                    self.logger.error(error_msg)
+                    return {"success": False, "reason": error_msg}
+                
+                # If we can't determine the specific error, check if we're still on login page
+                current_url = self.crawler_engine.page.url
+                if "login" in current_url.lower() or "checkpoint" in current_url.lower():
+                    error_msg = "Still on login page after attempt - login may have failed"
+                    self.logger.error(error_msg)
+                    return {"success": False, "reason": error_msg}
+                
+                self.logger.warning("Login status unclear, assuming failed")
+                return {"success": False, "reason": "Login status unclear - unable to determine success or failure"}
+                
+            except Exception as e:
+                error_msg = f"Error checking login status: {str(e)}"
+                self.logger.error(error_msg)
+                return {"success": False, "reason": error_msg}
+                
+        except Exception as e:
+            error_msg = f"Login attempt failed: {str(e)}"
+            self.logger.error(error_msg)
+            return {"success": False, "reason": error_msg}
+    
+    async def _perform_search(self, keyword: str) -> bool:
+        """Perform search using Facebook's search functionality"""
+        try:
+            self.logger.info(f"Looking for search box to search for: {keyword}")
+            
+            # Try to find the search box with various selectors
+            search_box_selectors = [
+                "input[placeholder*='Search']",
+                "input[name='q']",
+                "input[aria-label*='Search']",
+                "[data-testid='search_input']",
+                "input[type='search']",
+                "input[placeholder*='搜索']",  # Chinese placeholder
+                "input[aria-label*='搜索']",   # Chinese aria-label
+                "input[placeholder*='Buscar']", # Spanish placeholder
+                "input[aria-label*='Buscar']"  # Spanish aria-label
+            ]
+            
+            search_box = None
+            for selector in search_box_selectors:
+                try:
+                    search_box = await self.crawler_engine.page.query_selector(selector)
+                    if search_box:
+                        self.logger.info(f"Found search box with selector: {selector}")
+                        break
+                except Exception as e:
+                    self.logger.debug(f"Selector {selector} failed: {e}")
+                    continue
+            
+            if not search_box:
+                self.logger.error("Could not find search box on Facebook page")
+                return False
+            
+            # Clear and fill search box
+            try:
+                await search_box.click()
+                await asyncio.sleep(1)
+                await search_box.fill("")  # Clear any existing content
+                await asyncio.sleep(1)
+                
+                # Use advanced behavior simulation for typing if enabled
+                if self.config.get("anti_detection", {}).get("advanced_behavior", {}).get("enabled", True):
+                    await self.advanced_behavior_simulator.simulate_human_typing(
+                        self.crawler_engine.page, search_box, keyword, speed="normal"
+                    )
+                else:
+                    await search_box.fill(keyword)
+                
+                await asyncio.sleep(1)
+                
+                # Press Enter to search
+                await search_box.press("Enter")
+                await asyncio.sleep(3)
+                
+                self.logger.info("Search performed successfully")
+                return True
+                
+            except Exception as e:
+                self.logger.error(f"Error performing search: {e}")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"Failed to perform search: {e}")
+            return False
+    
     async def _attempt_login(self) -> dict:
         """Attempt to log in to Facebook using configured credentials"""
         try:
@@ -381,11 +665,16 @@ class FacebookVideoCrawler:
             
             # Get credentials from config
             credentials = self.config.get("login", {})
+            if not credentials:
+                error_msg = "Login configuration not found"
+                self.logger.error(error_msg)
+                return {"success": False, "reason": error_msg}
+            
             email = credentials.get("email")
             password = credentials.get("password")
             
             if not email or not password:
-                error_msg = "Login credentials not configured"
+                error_msg = f"Login credentials not configured. Email: {'set' if email else 'missing'}, Password: {'set' if password else 'missing'}"
                 self.logger.error(error_msg)
                 return {"success": False, "reason": error_msg}
             
