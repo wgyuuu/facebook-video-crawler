@@ -133,7 +133,7 @@ class Logger:
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(logging.INFO)
         console_formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+            '%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s'
         )
         console_handler.setFormatter(console_formatter)
         self.logger.addHandler(console_handler)
@@ -199,25 +199,8 @@ class Logger:
     
     def _log_with_extra(self, level: int, message: str, extra_fields: Optional[Dict[str, Any]] = None, **kwargs) -> None:
         """Log message with extra fields"""
-        if extra_fields:
-            # Create a custom log record with extra fields
-            record = self.logger.makeRecord(
-                self.name, level, "", 0, message, (), None
-            )
-            record.extra_fields = extra_fields
-            self.logger.handle(record)
-        else:
-            # Use standard logging
-            if level == logging.DEBUG:
-                self.logger.debug(message, **kwargs)
-            elif level == logging.INFO:
-                self.logger.info(message, **kwargs)
-            elif level == logging.WARNING:
-                self.logger.warning(message, **kwargs)
-            elif level == logging.ERROR:
-                self.logger.error(message, **kwargs)
-            elif level == logging.CRITICAL:
-                self.logger.critical(message, **kwargs)
+        extra = {'extra_fields': extra_fields} if extra_fields else None
+        self.logger.log(level, message, extra=extra, stacklevel=3, **kwargs)
     
     def debug(self, message: str, extra_fields: Optional[Dict[str, Any]] = None, **kwargs) -> None:
         """Log debug message"""
@@ -241,14 +224,8 @@ class Logger:
     
     def exception(self, message: str, extra_fields: Optional[Dict[str, Any]] = None, **kwargs) -> None:
         """Log exception message with traceback"""
-        if extra_fields:
-            record = self.logger.makeRecord(
-                self.name, logging.ERROR, "", 0, message, (), sys.exc_info()
-            )
-            record.extra_fields = extra_fields
-            self.logger.handle(record)
-        else:
-            self.logger.exception(message, **kwargs)
+        extra = {'extra_fields': extra_fields} if extra_fields else None
+        self.logger.exception(message, extra=extra, stacklevel=2, **kwargs)
     
     def performance_timer(self, operation: str):
         """Decorator for performance timing"""

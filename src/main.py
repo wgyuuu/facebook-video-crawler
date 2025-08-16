@@ -298,9 +298,6 @@ class FacebookVideoCrawler:
         """Navigate to Facebook homepage with multiple fallback strategies"""
         facebook_urls = [
             "https://www.facebook.com/",
-            "https://www.facebook.com/?lsrc=lb",  # The URL that was failing
-            "https://m.facebook.com/",  # Mobile version as fallback
-            "https://www.facebook.com/home.php"  # Alternative homepage URL
         ]
         
         for i, url in enumerate(facebook_urls):
@@ -499,7 +496,6 @@ class FacebookVideoCrawler:
                 await login_button.click()
             
             await asyncio.sleep(5)
-            
             # Check for security checkpoint and handle it
             checkpoint_result = await self._handle_security_checkpoint()
             if checkpoint_result["handled"]:
